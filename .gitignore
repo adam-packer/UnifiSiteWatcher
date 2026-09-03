@@ -1,0 +1,5 @@
+state.json
+local.settings.json
+bin/
+obj/
+*.zip

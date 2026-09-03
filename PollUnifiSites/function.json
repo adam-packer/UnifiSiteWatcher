@@ -1,0 +1,24 @@
+{
+    "bindings": [
+        {
+            "name": "Timer",
+            "type": "timerTrigger",
+            "direction": "in",
+            "schedule": "%POLL_SCHEDULE%"
+        },
+        {
+            "name": "StateIn",
+            "type": "blob",
+            "direction": "in",
+            "path": "unifi-watcher/state.json",
+            "connection": "AzureWebJobsStorage"
+        },
+        {
+            "name": "StateOut",
+            "type": "blob",
+            "direction": "out",
+            "path": "unifi-watcher/state.json",
+            "connection": "AzureWebJobsStorage"
+        }
+    ]
+}
