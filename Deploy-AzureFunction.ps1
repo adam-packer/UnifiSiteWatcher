@@ -65,15 +65,18 @@ Write-Host "[2/6] Storage account $StorageAccountName" -ForegroundColor Cyan
 Invoke-Az storage account create --name $StorageAccountName --resource-group $ResourceGroup --location $Location `
     --sku Standard_LRS --kind StorageV2 --min-tls-version TLS1_2 --allow-blob-public-access false --output none
 
-Write-Host "[3/6] Function App $FunctionAppName (Consumption, PowerShell 7.4)" -ForegroundColor Cyan
+Write-Host "[3/6] Function App $FunctionAppName (Consumption, PowerShell 7.6)" -ForegroundColor Cyan
 $existing = & az functionapp show --name $FunctionAppName --resource-group $ResourceGroup --query name --output tsv 2>$null
 if (-not $existing) {
     Invoke-Az functionapp create --name $FunctionAppName --resource-group $ResourceGroup --storage-account $StorageAccountName `
-        --consumption-plan-location $Location --runtime powershell --runtime-version 7.4 --functions-version 4 --os-type Windows `
+        --consumption-plan-location $Location --runtime powershell --runtime-version 7.6 --functions-version 4 --os-type Windows `
         --assign-identity '[system]' --output none
 }
 else {
     Invoke-Az functionapp identity assign --name $FunctionAppName --resource-group $ResourceGroup --output none
+    # Best effort: PS 7.4 reaches end-of-life on 2026-11-10.
+    & az functionapp config set --name $FunctionAppName --resource-group $ResourceGroup --powershell-version '7.6' --output none 2>$null
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Could not update the PowerShell version on the existing app; set it to 7.6 in the portal.' -ForegroundColor Yellow }
 }
 $principalId = (Invoke-Az functionapp identity show --name $FunctionAppName --resource-group $ResourceGroup --query principalId --output tsv).Trim()
 $identityAppId = (Invoke-Az ad sp show --id $principalId --query appId --output tsv).Trim()
@@ -84,9 +87,16 @@ $mailSendRole = 'b633e1c5-b582-4048-a93e-9f11b44c7e96'   # Mail.Send application
 $assigned = (Invoke-Az rest --method get --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$principalId/appRoleAssignments" `
         --query "value[?appRoleId=='$mailSendRole'] | length(@)" --output tsv).Trim()
 if ($assigned -eq '0') {
-    $body = @{ principalId = $principalId; resourceId = $graphSpId; appRoleId = $mailSendRole } | ConvertTo-Json -Compress
-    Invoke-Az rest --method post --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$principalId/appRoleAssignments" `
-        --headers 'Content-Type=application/json' --body $body --output none
+    # az on Windows is a batch file that mangles inline JSON bodies, so pass it as a file.
+    $bodyFile = [System.IO.Path]::GetTempFileName()
+    try {
+        [System.IO.File]::WriteAllText($bodyFile, (@{ principalId = $principalId; resourceId = $graphSpId; appRoleId = $mailSendRole } | ConvertTo-Json -Compress))
+        Invoke-Az rest --method post --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$principalId/appRoleAssignments" `
+            --headers 'Content-Type=application/json' --body "@$bodyFile" --output none
+    }
+    finally {
+        Remove-Item $bodyFile -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host "[5/6] App settings" -ForegroundColor Cyan
