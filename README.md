@@ -21,8 +21,8 @@ Mail is sent through **Microsoft Graph** (`sendMail`) using the Function App's m
 
 ```
 Modules/UnifiSiteWatcher/UnifiSiteWatcher.psm1   Core logic: API, state machine, Graph mail
-PollUnifiSites/function.json                     Timer trigger + blob-backed state bindings
-PollUnifiSites/run.ps1                           Function entry point
+PollUnifiSites/function.json                     Timer trigger
+PollUnifiSites/run.ps1                           Function entry point + blob-backed state
 Start-UnifiSiteWatcher.ps1                       Local runner (same module, state.json on disk)
 Deploy-AzureFunction.ps1                         az / func deployment script
 Get-UnifiSiteStatus.ps1                          Original one-shot status check
@@ -74,7 +74,7 @@ Prerequisites: [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-c
 
 The script is idempotent and will:
 
-1. Create the resource group, a `Standard_LRS` storage account, and a Consumption Function App (PowerShell 7.4, Windows) with a system-assigned managed identity.
+1. Create the resource group, a `Standard_LRS` storage account, and a Consumption Function App (PowerShell 7.6, Windows) with a system-assigned managed identity.
 2. Grant the identity the Microsoft Graph **Mail.Send** application role.
 3. If `-KeyVaultName` is given, create an RBAC-mode Key Vault, store the UniFi API key, and reference it from the `UNIFI_API_KEY` app setting.
 4. Set the remaining app settings and publish the code.

@@ -120,7 +120,10 @@ function Get-UnifiHosts {
 #region State serialisation
 
 function ConvertFrom-WatcherState {
-    param([string]$Json)
+    param(
+        [string]$Json,
+        [switch]$ThrowOnInvalid
+    )
     $state = @{}
     if ([string]::IsNullOrWhiteSpace($Json)) { return $state }
     try {
@@ -128,6 +131,7 @@ function ConvertFrom-WatcherState {
         foreach ($property in $obj.PSObject.Properties) { $state[$property.Name] = $property.Value }
     }
     catch {
+        if ($ThrowOnInvalid) { throw }
         Write-Log "Could not parse saved state, starting fresh: $($_.Exception.Message)" 'WARN'
     }
     $state
@@ -309,6 +313,9 @@ function Invoke-UnifiSiteWatch {
     $stillOffline = [System.Collections.Generic.List[object]]::new()
     $reminders    = [System.Collections.Generic.List[object]]::new()
     $recovered    = [System.Collections.Generic.List[object]]::new()
+    $offlineEntries  = [System.Collections.Generic.List[object]]::new()
+    $reminderEntries = [System.Collections.Generic.List[object]]::new()
+    $recoveryEntries = [System.Collections.Generic.List[object]]::new()
 
     foreach ($site in $sites) {
         $entry = $State[$site.Id]
@@ -328,7 +335,12 @@ function Invoke-UnifiSiteWatch {
         if ($site.IsOnline) {
             if ($entry.AlertSent) {
                 Write-Log "RECOVERED: $($site.Name)" 'ALERT'
-                if ($Config.NotifyOnRecovery) { $recovered.Add((New-SiteReport $site $entry $nowUtc)) }
+                if ($Config.NotifyOnRecovery) {
+                    $recovered.Add((New-SiteReport $site $entry $nowUtc))
+                    $recoveryEntries.Add($entry)
+                    $entry.Online = $true
+                    continue
+                }
             }
             $entry.Online           = $true
             $entry.OfflinePolls     = 0
@@ -346,8 +358,7 @@ function Invoke-UnifiSiteWatch {
         if (-not $entry.AlertSent) {
             if ($entry.OfflinePolls -ge $Config.OfflineConfirmPolls) {
                 $newlyOffline.Add($report)
-                $entry.AlertSent     = $true
-                $entry.LastAlertUnix = ConvertTo-UnixSeconds $nowUtc
+                $offlineEntries.Add($entry)
                 Write-Log "OFFLINE: $($site.Name) (state=$($site.ApiState))" 'ALERT'
             }
             else {
@@ -359,7 +370,7 @@ function Invoke-UnifiSiteWatch {
             $lastAlert = ConvertFrom-UnixSeconds $entry.LastAlertUnix
             if ($Config.ReminderMinutes -gt 0 -and $lastAlert -and ($nowUtc - $lastAlert).TotalMinutes -ge $Config.ReminderMinutes) {
                 $reminders.Add($report)
-                $entry.LastAlertUnix = ConvertTo-UnixSeconds $nowUtc
+                $reminderEntries.Add($entry)
             }
         }
     }
@@ -391,6 +402,22 @@ function Invoke-UnifiSiteWatch {
 
     try {
         Send-WatcherMail -Subject $subject -HtmlBody $html -Config $Config
+
+        foreach ($entry in $offlineEntries) {
+            $entry.AlertSent     = $true
+            $entry.LastAlertUnix = ConvertTo-UnixSeconds $nowUtc
+        }
+        foreach ($entry in $reminderEntries) {
+            $entry.LastAlertUnix = ConvertTo-UnixSeconds $nowUtc
+        }
+        foreach ($entry in $recoveryEntries) {
+            $entry.Online           = $true
+            $entry.OfflinePolls     = 0
+            $entry.AlertSent        = $false
+            $entry.OfflineSinceUnix = $null
+            $entry.LastAlertUnix    = $null
+        }
+
         Write-Log "Email sent to $($Config.MailTo -join ', '): $subject" 'ALERT'
     }
     catch {

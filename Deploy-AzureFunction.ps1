@@ -7,7 +7,7 @@
     updates settings and redeploys code.
 
     What it creates / configures:
-      - Resource group, Standard_LRS storage account, Consumption Function App (PowerShell 7.4, Windows)
+    - Resource group, Standard_LRS storage account, Consumption Function App (PowerShell 7.6, Windows)
       - System-assigned managed identity on the Function App
       - Microsoft Graph "Mail.Send" application permission granted to that identity
       - Optional Key Vault (RBAC mode) holding the UniFi API key, referenced from app settings

@@ -13,7 +13,7 @@
         "version": "[4.*, 5.0.0)"
     },
     "managedDependency": {
-        "enabled": false
+        "enabled": true
     },
     "functionTimeout": "00:05:00"
 }
