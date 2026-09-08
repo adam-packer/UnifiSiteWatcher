@@ -38,6 +38,7 @@ param(
     [bool]$NotifyOnRecovery = $true,
     [int]$ApiFailureAlertAfter = 5,
     [string[]]$MutedSiteIds = @(),
+    [switch]$SkipAppInsights,
     [switch]$SkipPublish
 )
 
@@ -71,6 +72,7 @@ $bicepParameters = @(
     "storageAccountName=$StorageAccountName"
     "location=$Location"
     "createFunctionApp=$(((-not $existing).ToString()).ToLower())"
+    "createAppInsights=$(((-not $SkipAppInsights).ToString()).ToLower())"
 )
 if ($KeyVaultName) { $bicepParameters += "keyVaultName=$KeyVaultName" }
 Invoke-Az deployment group create --resource-group $ResourceGroup --template-file (Join-Path $PSScriptRoot 'infra\main.bicep') `
@@ -106,14 +108,11 @@ if ($assigned -eq '0') {
 Write-Host "[4/5] App settings" -ForegroundColor Cyan
 $storageConnectionString = (Invoke-Az storage account show-connection-string --name $StorageAccountName `
         --resource-group $ResourceGroup --query connectionString --output tsv).Trim()
-$appInsightsConnectionString = (Invoke-Az monitor app-insights component show --app "$FunctionAppName-ai" `
-        --resource-group $ResourceGroup --query connectionString --output tsv).Trim()
 $settings = @(
     "AzureWebJobsStorage=$storageConnectionString"
     'FUNCTIONS_EXTENSION_VERSION=~4'
     'FUNCTIONS_WORKER_RUNTIME=powershell'
     'FUNCTIONS_WORKER_RUNTIME_VERSION=7.6'
-    "APPLICATIONINSIGHTS_CONNECTION_STRING=$appInsightsConnectionString"
     "POLL_SCHEDULE=$PollSchedule"
     "MAIL_FROM=$MailFrom"
     "MAIL_TO=$($MailTo -join ';')"
@@ -123,6 +122,12 @@ $settings = @(
     "NOTIFY_ON_RECOVERY=$($NotifyOnRecovery.ToString().ToLower())"
     "API_FAILURE_ALERT_AFTER=$ApiFailureAlertAfter"
 )
+
+if (-not $SkipAppInsights) {
+    $appInsightsConnectionString = (Invoke-Az monitor app-insights component show --app "$FunctionAppName-ai" `
+            --resource-group $ResourceGroup --query connectionString --output tsv).Trim()
+    $settings += "APPLICATIONINSIGHTS_CONNECTION_STRING=$appInsightsConnectionString"
+}
 
 if ($KeyVaultName) {
     $kvId = (Invoke-Az keyvault show --name $KeyVaultName --resource-group $ResourceGroup --query id --output tsv).Trim()
@@ -140,6 +145,11 @@ elseif ($apiKey) {
 }
 
 Invoke-Az functionapp config appsettings set --name $FunctionAppName --resource-group $ResourceGroup --settings @settings --output none
+if ($SkipAppInsights) {
+    & az functionapp config appsettings delete --name $FunctionAppName --resource-group $ResourceGroup `
+        --setting-names APPLICATIONINSIGHTS_CONNECTION_STRING APPINSIGHTS_INSTRUMENTATIONKEY --output none 2>$null
+    Write-Host 'Application Insights disabled. Delete an existing resource named <FunctionAppName>-ai separately if it is no longer needed.' -ForegroundColor Yellow
+}
 Remove-Variable apiKey
 
 if (-not $SkipPublish) {

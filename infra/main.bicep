@@ -17,6 +17,9 @@ param keyVaultName string = ''
 @description('Create the Function App and Consumption plan. Set false when adopting an existing app.')
 param createFunctionApp bool = true
 
+@description('Create an Application Insights component for monitoring.')
+param createAppInsights bool = true
+
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageAccountName
   location: location
@@ -31,7 +34,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   }
 }
 
-resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = if (createAppInsights) {
   name: '${functionAppName}-ai'
   location: location
   kind: 'web'
@@ -90,4 +93,3 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = if (!empty(keyVaultNa
 }
 
 output storageAccountName string = storage.name
-output appInsightsConnectionString string = appInsights.properties.ConnectionString

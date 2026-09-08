@@ -90,12 +90,14 @@ Prerequisites: [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-c
     -MailFrom        unifi-alerts@example.com `
     -MailTo          noc@example.com,you@example.com `
     -MutedSiteIds    @('host-id-to-ignore') `
-    -KeyVaultName    kv-unifi-watcher-acme      # optional; omit to store the API key as a plain app setting
+    -KeyVaultName    kv-unifi-watcher-example  # optional; omit to store the API key as a plain app setting
 ```
+
+Application Insights is enabled by default for easier troubleshooting. Add `-SkipAppInsights` if you do not want the monitoring resource or its ingestion/storage charges. When used on an existing deployment, it removes the Function App connection settings but does not delete an existing `<FunctionAppName>-ai` resource or its data; delete that resource separately if it is no longer needed.
 
 The script is idempotent and will:
 
-1. Deploy `infra/main.bicep`: a `Standard_LRS` storage account, Application Insights, and a Consumption Function App (PowerShell 7.6, Windows) with a system-assigned managed identity.
+1. Deploy `infra/main.bicep`: a `Standard_LRS` storage account, an optional Application Insights component, and a Consumption Function App (PowerShell 7.6, Windows) with a system-assigned managed identity.
 2. Grant the identity the Microsoft Graph **Mail.Send** application role.
 3. If `-KeyVaultName` is given, create an RBAC-mode Key Vault, store the UniFi API key, and reference it from the `UNIFI_API_KEY` app setting.
 4. Set the remaining app settings and publish the code.
@@ -122,4 +124,4 @@ New-ApplicationAccessPolicy -AppId <identity appId> `
 
 ## Cost
 
-At a 1-minute schedule the watcher runs ~43,000 times a month, well inside the Consumption plan's 1M free executions and 400,000 GB-s. Storage and Key Vault usage is negligible.
+At a 1-minute schedule the watcher runs ~43,000 times a month, well inside the Consumption plan's 1M free executions and 400,000 GB-s allowance. Azure pricing and free grants can change, and storage, networking, Key Vault, and Application Insights ingestion/storage can still incur charges. Use `-SkipAppInsights` for the lowest-cost deployment, and review the [Azure Functions pricing](https://azure.microsoft.com/pricing/details/functions/) and [Application Insights pricing](https://azure.microsoft.com/pricing/details/monitor/) before production use.
