@@ -1,5 +1,7 @@
 # UniFi Site Watcher
 
+[MIT licensed](LICENSE)
+
 Polls the [UniFi Site Manager API](https://developer.ui.com/site-manager-api/) and emails a distribution list when a whole site (console) goes offline or comes back.
 
 UniFi's built-in notifications are sent *by the devices themselves*, so when an entire site loses connectivity nothing gets reported. This fills that gap with a lightweight poller that runs as an Azure Function (free Consumption tier) or locally.
