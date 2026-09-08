@@ -1,5 +1,11 @@
 state.json
 local.settings.json
+.env
+.env.*
+!.env.example
+*.pfx
+*.pem
+*.key
 bin/
 obj/
 *.zip

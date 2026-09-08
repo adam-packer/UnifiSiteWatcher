@@ -86,9 +86,9 @@ Prerequisites: [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-c
 ```powershell
 .\Deploy-AzureFunction.ps1 `
     -ResourceGroup   rg-unifi-watcher `
-    -FunctionAppName func-unifi-watcher-acme `
-    -MailFrom        unifi-alerts@acme.com `
-    -MailTo          noc@acme.com,you@acme.com `
+    -FunctionAppName func-unifi-watcher-example `
+    -MailFrom        unifi-alerts@example.com `
+    -MailTo          noc@example.com,you@example.com `
     -MutedSiteIds    @('host-id-to-ignore') `
     -KeyVaultName    kv-unifi-watcher-acme      # optional; omit to store the API key as a plain app setting
 ```

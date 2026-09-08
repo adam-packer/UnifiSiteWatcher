@@ -11,8 +11,8 @@
         "API_FAILURE_ALERT_AFTER": "5",
         "MUTED_SITE_IDS": "",
         "UNIFI_API_KEY": "<unifi site manager api key>",
-        "MAIL_FROM": "unifi-alerts@yourcompany.com",
-        "MAIL_TO": "noc@yourcompany.com;you@yourcompany.com",
+        "MAIL_FROM": "unifi-alerts@example.com",
+        "MAIL_TO": "noc@example.com;you@example.com",
         "GRAPH_TENANT_ID": "<tenant guid - local dev only, Azure uses managed identity>",
         "GRAPH_CLIENT_ID": "<app registration client id - local dev only>",
         "GRAPH_CLIENT_SECRET": "<app registration client secret - local dev only>"

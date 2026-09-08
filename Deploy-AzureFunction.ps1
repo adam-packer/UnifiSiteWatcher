@@ -20,8 +20,8 @@
       New-ApplicationAccessPolicy -AppId <identity appId printed below> -PolicyScopeGroupId <mail-enabled security group containing MAIL_FROM> -AccessRight RestrictAccess -Description 'UniFi Site Watcher'
 
 .EXAMPLE
-    .\Deploy-AzureFunction.ps1 -ResourceGroup rg-unifi-watcher -FunctionAppName func-unifi-watcher-acme `
-        -MailFrom unifi-alerts@acme.com -MailTo noc@acme.com,you@acme.com -KeyVaultName kv-unifi-watcher-acme
+    .\Deploy-AzureFunction.ps1 -ResourceGroup rg-unifi-watcher -FunctionAppName func-unifi-watcher-example `
+        -MailFrom unifi-alerts@example.com -MailTo noc@example.com,you@example.com -KeyVaultName kv-unifi-watcher-example
 #>
 [CmdletBinding()]
 param(
