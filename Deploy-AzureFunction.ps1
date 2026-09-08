@@ -7,11 +7,13 @@
     updates settings and redeploys code.
 
     What it creates / configures:
-    - Resource group, Standard_LRS storage account, Consumption Function App (PowerShell 7.6, Windows)
+        - Resource group, Standard_LRS storage account, Consumption Function App (PowerShell 7.6, Windows)
+            from infra/main.bicep
       - System-assigned managed identity on the Function App
       - Microsoft Graph "Mail.Send" application permission granted to that identity
       - Optional Key Vault (RBAC mode) holding the UniFi API key, referenced from app settings
-      - App settings: POLL_SCHEDULE, MAIL_FROM, MAIL_TO, thresholds, UNIFI_API_KEY (or Key Vault reference)
+            - App settings: POLL_SCHEDULE, MAIL_FROM, MAIL_TO, muted site IDs, thresholds,
+                UNIFI_API_KEY (or Key Vault reference)
 
     Recommended follow-up (Exchange Online PowerShell) so the identity can ONLY send as MAIL_FROM,
     rather than as any mailbox in the tenant:
@@ -35,6 +37,7 @@ param(
     [int]$ReminderMinutes = 60,
     [bool]$NotifyOnRecovery = $true,
     [int]$ApiFailureAlertAfter = 5,
+    [string[]]$MutedSiteIds = @(),
     [switch]$SkipPublish
 )
 
@@ -58,30 +61,31 @@ if (-not $StorageAccountName) {
 $apiKeySecure = Read-Host 'UniFi Site Manager API key (Enter to keep existing setting)' -AsSecureString
 $apiKey = [System.Net.NetworkCredential]::new('', $apiKeySecure).Password
 
-Write-Host "`n[1/6] Resource group $ResourceGroup ($Location)" -ForegroundColor Cyan
+Write-Host "`n[1/5] Resource group $ResourceGroup ($Location)" -ForegroundColor Cyan
 Invoke-Az group create --name $ResourceGroup --location $Location --output none
 
-Write-Host "[2/6] Storage account $StorageAccountName" -ForegroundColor Cyan
-Invoke-Az storage account create --name $StorageAccountName --resource-group $ResourceGroup --location $Location `
-    --sku Standard_LRS --kind StorageV2 --min-tls-version TLS1_2 --allow-blob-public-access false --output none
-
-Write-Host "[3/6] Function App $FunctionAppName (Consumption, PowerShell 7.6)" -ForegroundColor Cyan
+Write-Host "[2/5] Azure resources from infra/main.bicep" -ForegroundColor Cyan
 $existing = & az functionapp show --name $FunctionAppName --resource-group $ResourceGroup --query name --output tsv 2>$null
-if (-not $existing) {
-    Invoke-Az functionapp create --name $FunctionAppName --resource-group $ResourceGroup --storage-account $StorageAccountName `
-        --consumption-plan-location $Location --runtime powershell --runtime-version 7.6 --functions-version 4 --os-type Windows `
-        --assign-identity '[system]' --output none
-}
-else {
+$bicepParameters = @(
+    "functionAppName=$FunctionAppName"
+    "storageAccountName=$StorageAccountName"
+    "location=$Location"
+    "createFunctionApp=$(((-not $existing).ToString()).ToLower())"
+)
+if ($KeyVaultName) { $bicepParameters += "keyVaultName=$KeyVaultName" }
+Invoke-Az deployment group create --resource-group $ResourceGroup --template-file (Join-Path $PSScriptRoot 'infra\main.bicep') `
+    --parameters @bicepParameters --output none
+
+if ($existing) {
     Invoke-Az functionapp identity assign --name $FunctionAppName --resource-group $ResourceGroup --output none
-    # Best effort: PS 7.4 reaches end-of-life on 2026-11-10.
     & az functionapp config set --name $FunctionAppName --resource-group $ResourceGroup --powershell-version '7.6' --output none 2>$null
     if ($LASTEXITCODE -ne 0) { Write-Host 'Could not update the PowerShell version on the existing app; set it to 7.6 in the portal.' -ForegroundColor Yellow }
 }
+
 $principalId = (Invoke-Az functionapp identity show --name $FunctionAppName --resource-group $ResourceGroup --query principalId --output tsv).Trim()
 $identityAppId = (Invoke-Az ad sp show --id $principalId --query appId --output tsv).Trim()
 
-Write-Host "[4/6] Granting Microsoft Graph Mail.Send to managed identity $principalId" -ForegroundColor Cyan
+Write-Host "[3/5] Granting Microsoft Graph Mail.Send to managed identity $principalId" -ForegroundColor Cyan
 $graphSpId    = (Invoke-Az ad sp list --filter "appId eq '00000003-0000-0000-c000-000000000000'" --query '[0].id' --output tsv).Trim()
 $mailSendRole = 'b633e1c5-b582-4048-a93e-9f11b44c7e96'   # Mail.Send application permission
 $assigned = (Invoke-Az rest --method get --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$principalId/appRoleAssignments" `
@@ -99,11 +103,21 @@ if ($assigned -eq '0') {
     }
 }
 
-Write-Host "[5/6] App settings" -ForegroundColor Cyan
+Write-Host "[4/5] App settings" -ForegroundColor Cyan
+$storageConnectionString = (Invoke-Az storage account show-connection-string --name $StorageAccountName `
+        --resource-group $ResourceGroup --query connectionString --output tsv).Trim()
+$appInsightsConnectionString = (Invoke-Az monitor app-insights component show --app "$FunctionAppName-ai" `
+        --resource-group $ResourceGroup --query connectionString --output tsv).Trim()
 $settings = @(
+    "AzureWebJobsStorage=$storageConnectionString"
+    'FUNCTIONS_EXTENSION_VERSION=~4'
+    'FUNCTIONS_WORKER_RUNTIME=powershell'
+    'FUNCTIONS_WORKER_RUNTIME_VERSION=7.6'
+    "APPLICATIONINSIGHTS_CONNECTION_STRING=$appInsightsConnectionString"
     "POLL_SCHEDULE=$PollSchedule"
     "MAIL_FROM=$MailFrom"
     "MAIL_TO=$($MailTo -join ';')"
+    "MUTED_SITE_IDS=$($MutedSiteIds -join ',')"
     "OFFLINE_CONFIRM_POLLS=$OfflineConfirmPolls"
     "REMINDER_MINUTES=$ReminderMinutes"
     "NOTIFY_ON_RECOVERY=$($NotifyOnRecovery.ToString().ToLower())"
@@ -111,10 +125,6 @@ $settings = @(
 )
 
 if ($KeyVaultName) {
-    $kvExists = & az keyvault show --name $KeyVaultName --resource-group $ResourceGroup --query name --output tsv 2>$null
-    if (-not $kvExists) {
-        Invoke-Az keyvault create --name $KeyVaultName --resource-group $ResourceGroup --location $Location --enable-rbac-authorization true --output none
-    }
     $kvId = (Invoke-Az keyvault show --name $KeyVaultName --resource-group $ResourceGroup --query id --output tsv).Trim()
     $me   = (Invoke-Az ad signed-in-user show --query id --output tsv).Trim()
     Invoke-Az role assignment create --assignee-object-id $me --assignee-principal-type User --role 'Key Vault Secrets Officer' --scope $kvId --output none
@@ -133,7 +143,7 @@ Invoke-Az functionapp config appsettings set --name $FunctionAppName --resource-
 Remove-Variable apiKey
 
 if (-not $SkipPublish) {
-    Write-Host "[6/6] Publishing code" -ForegroundColor Cyan
+    Write-Host "[5/5] Publishing code" -ForegroundColor Cyan
     Push-Location $PSScriptRoot
     try { & func azure functionapp publish $FunctionAppName --powershell; if ($LASTEXITCODE -ne 0) { throw 'func publish failed.' } }
     finally { Pop-Location }

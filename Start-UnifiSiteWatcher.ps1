@@ -16,13 +16,15 @@
     .\Start-UnifiSiteWatcher.ps1                                # poll every minute until Ctrl+C
     .\Start-UnifiSiteWatcher.ps1 -IntervalMinutes 5
     .\Start-UnifiSiteWatcher.ps1 -RunOnce
+    .\Start-UnifiSiteWatcher.ps1 -ListSites
 #>
 [CmdletBinding()]
 param(
     [string]$SettingsPath = (Join-Path $PSScriptRoot 'local.settings.json'),
     [ValidateRange(1, 1440)][int]$IntervalMinutes = 1,
     [switch]$RunOnce,
-    [switch]$TestEmail
+    [switch]$TestEmail,
+    [switch]$ListSites
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,7 +41,16 @@ if (Test-Path $SettingsPath) {
     }
 }
 
-$config    = Get-WatcherConfig
+$config = Get-WatcherConfig -ApiOnly:$ListSites
+
+if ($ListSites) {
+    Get-UnifiHosts -ApiKey $config.ApiKey |
+        Sort-Object Name |
+        Select-Object Name, Id, @{ Name = 'Status'; Expression = { $_.ApiState } },
+            @{ Name = 'Muted'; Expression = { @($config.MutedSiteIds) -contains $_.Id } }
+    return
+}
+
 $statePath = Join-Path $PSScriptRoot 'state.json'
 
 if ($TestEmail) {

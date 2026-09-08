@@ -17,6 +17,19 @@ Every poll (default: 1 minute) the watcher fetches `/v1/hosts` and compares each
 
 Mail is sent through **Microsoft Graph** (`sendMail`) using the Function App's managed identity, or an app registration with a client secret when running locally. State persists between polls so a restart does not re-alert on sites already reported.
 
+## Quick start
+
+```powershell
+Copy-Item local.settings.sample.json local.settings.json
+# Add UNIFI_API_KEY, then discover the IDs used by the API:
+.\Start-UnifiSiteWatcher.ps1 -ListSites
+# Add mail and Graph settings, then verify delivery:
+.\Start-UnifiSiteWatcher.ps1 -TestEmail
+.\Start-UnifiSiteWatcher.ps1
+```
+
+`-ListSites` only requires `UNIFI_API_KEY`; it does not send mail or change saved state.
+
 ## Layout
 
 ```
@@ -25,6 +38,7 @@ PollUnifiSites/function.json                     Timer trigger
 PollUnifiSites/run.ps1                           Function entry point + blob-backed state
 Start-UnifiSiteWatcher.ps1                       Local runner (same module, state.json on disk)
 Deploy-AzureFunction.ps1                         az / func deployment script
+infra/main.bicep                                 Azure infrastructure source of truth
 Get-UnifiSiteStatus.ps1                          Original one-shot status check
 host.json, local.settings.sample.json            Functions host config and settings template
 ```
@@ -38,6 +52,7 @@ All configuration is via environment variables (Function App settings, or `local
 | `UNIFI_API_KEY` | required | Site Manager API key from <https://unifi.ui.com> → Settings → API |
 | `MAIL_FROM` | required | Mailbox to send from (UPN or shared mailbox) |
 | `MAIL_TO` | required | Recipients, `;` or `,` separated |
+| `MUTED_SITE_IDS` | empty | Host IDs to suppress, `;` or `,` separated; find them with `-ListSites` |
 | `POLL_SCHEDULE` | `0 */1 * * * *` | NCRONTAB timer expression (Azure only) |
 | `OFFLINE_CONFIRM_POLLS` | `2` | Consecutive offline polls before alerting |
 | `REMINDER_MINUTES` | `60` | Re-send while still offline; `0` disables |
@@ -55,9 +70,12 @@ Copy-Item local.settings.sample.json local.settings.json   # fill in values; thi
 .\Start-UnifiSiteWatcher.ps1                               # poll every minute until Ctrl+C
 .\Start-UnifiSiteWatcher.ps1 -IntervalMinutes 5
 .\Start-UnifiSiteWatcher.ps1 -RunOnce                      # single poll, e.g. from Task Scheduler
+.\Start-UnifiSiteWatcher.ps1 -ListSites                    # name, ID, status, and muted state
 ```
 
 Existing environment variables take precedence over `local.settings.json`.
+
+Muted IDs are treated as opaque strings; they are not required to be GUIDs. Muted sites continue to update their saved outage state but are excluded from offline, reminder, and recovery emails. If a site is unmuted while still offline and has passed the confirmation threshold, it alerts on the next poll.
 
 ## Deploying to Azure
 
@@ -69,17 +87,26 @@ Prerequisites: [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-c
     -FunctionAppName func-unifi-watcher-acme `
     -MailFrom        unifi-alerts@acme.com `
     -MailTo          noc@acme.com,you@acme.com `
+    -MutedSiteIds    @('host-id-to-ignore') `
     -KeyVaultName    kv-unifi-watcher-acme      # optional; omit to store the API key as a plain app setting
 ```
 
 The script is idempotent and will:
 
-1. Create the resource group, a `Standard_LRS` storage account, and a Consumption Function App (PowerShell 7.6, Windows) with a system-assigned managed identity.
+1. Deploy `infra/main.bicep`: a `Standard_LRS` storage account, Application Insights, and a Consumption Function App (PowerShell 7.6, Windows) with a system-assigned managed identity.
 2. Grant the identity the Microsoft Graph **Mail.Send** application role.
 3. If `-KeyVaultName` is given, create an RBAC-mode Key Vault, store the UniFi API key, and reference it from the `UNIFI_API_KEY` app setting.
 4. Set the remaining app settings and publish the code.
 
 State is kept in the `unifi-watcher/state.json` blob in the Function App's own storage account. Logs go to Application Insights / `az webapp log tail`.
+
+### Infrastructure as code
+
+[`infra/main.bicep`](infra/main.bicep) is the maintained infrastructure definition and the deployment script invokes it with `az deployment group create`. ARM JSON is intentionally not checked in because it is generated output; produce it when needed with:
+
+```powershell
+az bicep build --file infra/main.bicep --outfile infra/main.json
+```
 
 ### Restrict the sender
 

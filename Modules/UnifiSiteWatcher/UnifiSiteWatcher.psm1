@@ -31,18 +31,23 @@ function Get-WatcherSetting {
 }
 
 function Get-WatcherConfig {
+    param([switch]$ApiOnly)
+
     $config = [PSCustomObject]@{
         ApiKey               = Get-WatcherSetting UNIFI_API_KEY
         MailFrom             = Get-WatcherSetting MAIL_FROM
         MailTo               = @((Get-WatcherSetting MAIL_TO '') -split '[;,]' | ForEach-Object Trim | Where-Object { $_ })
+        MutedSiteIds         = @((Get-WatcherSetting MUTED_SITE_IDS '') -split '[;,]' | ForEach-Object Trim | Where-Object { $_ })
         OfflineConfirmPolls  = [int](Get-WatcherSetting OFFLINE_CONFIRM_POLLS 2)
         ReminderMinutes      = [int](Get-WatcherSetting REMINDER_MINUTES 60)
         NotifyOnRecovery     = [bool]::Parse((Get-WatcherSetting NOTIFY_ON_RECOVERY 'true'))
         ApiFailureAlertAfter = [int](Get-WatcherSetting API_FAILURE_ALERT_AFTER 5)
     }
-    if (-not $config.ApiKey)        { throw 'UNIFI_API_KEY is not set.' }
-    if (-not $config.MailFrom)      { throw 'MAIL_FROM is not set (mailbox the alerts are sent from).' }
-    if ($config.MailTo.Count -eq 0) { throw 'MAIL_TO is not set (semicolon-separated recipient list).' }
+    if (-not $config.ApiKey) { throw 'UNIFI_API_KEY is not set.' }
+    if (-not $ApiOnly) {
+        if (-not $config.MailFrom)      { throw 'MAIL_FROM is not set (mailbox the alerts are sent from).' }
+        if ($config.MailTo.Count -eq 0) { throw 'MAIL_TO is not set (semicolon-separated recipient list).' }
+    }
     $config
 }
 
@@ -332,6 +337,22 @@ function Invoke-UnifiSiteWatch {
         }
         $entry.Name = $site.Name
 
+        if (@($Config.MutedSiteIds) -contains $site.Id) {
+            if ($site.IsOnline) {
+                $entry.Online           = $true
+                $entry.OfflinePolls     = 0
+                $entry.AlertSent        = $false
+                $entry.OfflineSinceUnix = $null
+                $entry.LastAlertUnix    = $null
+            }
+            else {
+                $entry.Online = $false
+                $entry.OfflinePolls = [int]$entry.OfflinePolls + 1
+                if (-not $entry.OfflineSinceUnix) { $entry.OfflineSinceUnix = ConvertTo-UnixSeconds $nowUtc }
+            }
+            continue
+        }
+
         if ($site.IsOnline) {
             if ($entry.AlertSent) {
                 Write-Log "RECOVERED: $($site.Name)" 'ALERT'
@@ -375,9 +396,11 @@ function Invoke-UnifiSiteWatch {
         }
     }
 
-    $offlineSites = @($sites | Where-Object { -not $_.IsOnline })
-    $summary = 'Poll complete: {0} online, {1} offline' -f ($sites.Count - $offlineSites.Count), $offlineSites.Count
+    $monitoredSites = @($sites | Where-Object { @($Config.MutedSiteIds) -notcontains $_.Id })
+    $offlineSites = @($monitoredSites | Where-Object { -not $_.IsOnline })
+    $summary = 'Poll complete: {0} online, {1} offline' -f ($monitoredSites.Count - $offlineSites.Count), $offlineSites.Count
     if ($offlineSites.Count) { $summary += ' (' + (Format-SiteList $offlineSites) + ')' }
+    if ($monitoredSites.Count -lt $sites.Count) { $summary += ', {0} muted' -f ($sites.Count - $monitoredSites.Count) }
     Write-Log $summary
 
     if ($newlyOffline.Count -eq 0 -and $reminders.Count -eq 0 -and $recovered.Count -eq 0) { return }
