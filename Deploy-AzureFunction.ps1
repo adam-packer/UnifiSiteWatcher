@@ -116,12 +116,17 @@ $settings = @(
     "POLL_SCHEDULE=$PollSchedule"
     "MAIL_FROM=$MailFrom"
     "MAIL_TO=$($MailTo -join ';')"
-    "MUTED_SITE_IDS=$($MutedSiteIds -join ',')"
     "OFFLINE_CONFIRM_POLLS=$OfflineConfirmPolls"
     "REMINDER_MINUTES=$ReminderMinutes"
     "NOTIFY_ON_RECOVERY=$($NotifyOnRecovery.ToString().ToLower())"
     "API_FAILURE_ALERT_AFTER=$ApiFailureAlertAfter"
 )
+
+# Only touch MUTED_SITE_IDS when explicitly passed, so re-running to redeploy code
+# doesn't silently clear a mute list set via the portal or a previous run.
+if ($PSBoundParameters.ContainsKey('MutedSiteIds')) {
+    $settings += "MUTED_SITE_IDS=$($MutedSiteIds -join ',')"
+}
 
 if (-not $SkipAppInsights) {
     $appInsightsConnectionString = (Invoke-Az monitor app-insights component show --app "$FunctionAppName-ai" `
